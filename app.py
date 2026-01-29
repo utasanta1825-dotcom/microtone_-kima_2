@@ -12,7 +12,7 @@ from google.oauth2.service_account import Credentials
 # 設定（GitHub構造に合わせる）
 # =========================
 BASE_DIR = "assets"
-SEQ_DIR = os.path.join(BASE_DIR, "sequential", )
+SEQ_DIR = os.path.join(BASE_DIR, "sequential" )
 SIM_DIR = os.path.join(BASE_DIR, "simultaneous")
 
 DATA_DIR = "data"
