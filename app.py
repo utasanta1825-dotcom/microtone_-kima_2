@@ -11,12 +11,53 @@ from google.oauth2.service_account import Credentials
 # =========================
 # 設定（GitHub構造に合わせる）
 # =========================
-BASE_DIR = "assets"
-SEQ_DIR = os.path.join(BASE_DIR, "sequential" )
-SIM_DIR = os.path.join(BASE_DIR, "simultaneous")
+# =========================
+# 音源フォルダ自動検出（Cloudで迷子防止）
+# =========================
+def abs_path(rel_path: str) -> str:
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, rel_path)
 
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
+def pick_first_existing_dir(candidates):
+    for c in candidates:
+        p = abs_path(c)
+        if os.path.isdir(p):
+            return c
+    return None
+
+def list_wavs(rel_dir: str):
+    full_dir = abs_path(rel_dir)
+    if not os.path.exists(full_dir):
+        return None, []
+    files = sorted([f for f in os.listdir(full_dir) if f.lower().endswith(".wav")])
+    return full_dir, files
+
+
+# 候補（あなたの今までの構造ぜんぶ入れておく）
+SEQ_DIR = pick_first_existing_dir([
+    "assets/sequential",
+    "assets/sequential/sequential",
+    "微分音/sequential",
+])
+
+SIM_DIR = pick_first_existing_dir([
+    "assets/simultaneous",
+    "微分音/simultaneous",
+])
+
+# デバッグ表示（最初だけONにして、動いたら消してOK）
+st.sidebar.markdown("### 🔍 Path Debug")
+st.sidebar.write("app.py dir:", abs_path("."))
+st.sidebar.write("SEQ_DIR:", SEQ_DIR)
+st.sidebar.write("SIM_DIR:", SIM_DIR)
+
+# もし見つからなければ、wavが存在する場所を一覧表示して止める
+if SEQ_DIR is None or SIM_DIR is None:
+    st.error("音源フォルダを自動検出できませんでした。")
+    st.write("wavが見つかったフォルダ候補（リポジトリ内）:")
+    st.write(list_wavs_anywhere("."))
+    st.stop()
+
 
 LOCAL_CSV = os.path.join(DATA_DIR, "evaluation_results.csv")
 PARTICIPANTS_CSV = os.path.join(DATA_DIR, "participants.csv")
