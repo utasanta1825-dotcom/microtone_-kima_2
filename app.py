@@ -170,7 +170,7 @@ hr {border:none; border-top:1px solid #eee; margin: 14px 0;}
 """, unsafe_allow_html=True)
 
 st.markdown("<div class='big-title'>音律評価実験（3ブロック）</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub'>ブロック順は固定：SEQ → basic → colors。各ブロック内はランダム順で評価します。</div>", unsafe_allow_html=True)
+
 
 # =========================
 # セッション初期化
@@ -351,8 +351,6 @@ st.markdown(
 )
 st.progress((idx + 1) / total)
 
-st.markdown(f"**ブロック:** `{trial['block']}`（{block_label}）")
-st.markdown(f"**項目:** `{trial['item_id']}`")
 
 # ブロック境界の案内（最初の要素が切り替わった時にわかるように）
 if idx > 0:
