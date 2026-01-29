@@ -9,6 +9,45 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # =========================
+# DEBUG: repo内の実ファイル確認（最優先）
+# =========================
+from pathlib import Path
+
+def repo_tree(max_items=300):
+    root = Path(__file__).resolve().parent
+    items = []
+    for p in root.rglob("*"):
+        if p.is_dir():
+            continue
+        rel = p.relative_to(root).as_posix()
+        # サイズも出す（LFS/空ファイル判定に役立つ）
+        try:
+            sz = p.stat().st_size
+        except Exception:
+            sz = -1
+        items.append((rel, sz))
+        if len(items) >= max_items:
+            break
+    return root, items
+
+def find_wav_dirs():
+    root = Path(__file__).resolve().parent
+    wav_dirs = set()
+    for p in root.rglob("*.wav"):
+        if p.is_file():
+            wav_dirs.add(p.parent.relative_to(root).as_posix())
+    return sorted(wav_dirs)
+
+# サイドバーに状況表示
+root, items = repo_tree()
+st.sidebar.markdown("### 🔍 Repo Debug")
+st.sidebar.write("repo root:", str(root))
+st.sidebar.write("found wav dirs:", find_wav_dirs())
+st.sidebar.write("first files (path, bytes):")
+st.sidebar.write(items)
+
+
+# =========================
 # 設定（GitHub構造に合わせる）
 # =========================
 # =========================
@@ -44,6 +83,12 @@ SIM_DIR = pick_first_existing_dir([
     "assets/simultaneous",
     "微分音/simultaneous",
 ])
+
+if SEQ_DIR is None or SIM_DIR is None:
+    st.error("音源フォルダを自動検出できませんでした。")
+    st.write("サイドバーの Repo Debug を見て、wav が存在するフォルダが出ているか確認してください。")
+    st.stop()
+
 
 # デバッグ表示（最初だけONにして、動いたら消してOK）
 st.sidebar.markdown("### 🔍 Path Debug")
