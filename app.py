@@ -9,15 +9,18 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # =========================
-# 設定（あなたのGitHub構造に合わせる）
+# 設定（あなたのGitHub構造）
 # =========================
 BASE_DIR = "assets"
 SEQ_DIR = os.path.join(BASE_DIR, "sequential")
+SIM_DIR_BASIC = os.path.join(BASE_DIR, "simultaneous_basic")
+SIM_DIR_COLORS = os.path.join(BASE_DIR, "simultaneous_colors")
 
-SIM_CONDS = {
-    "basic": os.path.join(BASE_DIR, "simultaneous_basic"),
-    "colors": os.path.join(BASE_DIR, "simultaneous_colors"),
-}
+BLOCKS = [
+    {"key": "SEQ", "label": "順番再生（SEQ）", "dir": SEQ_DIR},
+    {"key": "basic", "label": "同時音（basic / prog_triad_basic）", "dir": SIM_DIR_BASIC},
+    {"key": "colors", "label": "同時音（colors / set_root0_colors）", "dir": SIM_DIR_COLORS},
+]
 
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -25,11 +28,6 @@ os.makedirs(DATA_DIR, exist_ok=True)
 LOCAL_CSV = os.path.join(DATA_DIR, "evaluation_results.csv")
 PARTICIPANTS_CSV = os.path.join(DATA_DIR, "participants.csv")
 ADMIN_PIN = "0000"
-
-COND_LABEL = {
-    "basic": "同時音（basic / prog_triad_basic）",
-    "colors": "同時音（colors / set_root0_colors）",
-}
 
 # =========================
 # Google Sheets
@@ -75,18 +73,13 @@ def init_csv():
         header = [
             "Participant_ID",
             "Timestamp_UTC",
-            "Pair_ID",
-            "Condition",          # ★追加
-            "SEQ_File",
-            "SIM_File",
-            "SEQ_Valence",
-            "SEQ_Arousal",
-            "SEQ_Diff",
-            "SEQ_PlayCount",
-            "SIM_Valence",
-            "SIM_Arousal",
-            "SIM_Diff",
-            "SIM_PlayCount",
+            "Block",        # SEQ / basic / colors
+            "Item_ID",      # A_balanced など
+            "File",
+            "Valence",
+            "Arousal",
+            "Diff",
+            "PlayCount",
         ]
         with open(LOCAL_CSV, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(header)
@@ -111,57 +104,37 @@ def append_participant_row(row):
     _, ws_profile = get_sheets()
     ws_profile.append_row(row, value_input_option="USER_ENTERED")
 
-# =========================
-# ペア作成（2条件：basic/colors）
-# =========================
-def make_pairs_multi(seq_files, sim_files_by_cond):
+def infer_item_id(filename: str) -> str:
     """
-    seq_files: sequentialのwav一覧
-    sim_files_by_cond: {"basic":[...], "colors":[...]}
-    返り値: pairs = [{"pair_id":..., "condition":..., "SEQ":..., "SIM":..., ...}, ...]
+    先頭キーを Item_ID にする
+    例:
+      A_balanced_SEQ_scale.wav -> A_balanced
+      A_balanced_SIMSEQ_prog_triad_basic.wav -> A_balanced
+      A_balanced_SIMSEQ_set_root0_colors.wav -> A_balanced
     """
+    m = re.match(r"^(.+?)_(SEQ|SIM)", filename)
+    return m.group(1) if m else os.path.splitext(filename)[0]
 
-    def key_from_seq(fn: str):
-        # 例: A_balanced_SEQ_scale.wav -> A_balanced
-        m = re.match(r"^(.+?)_SEQ", fn)
-        return m.group(1) if m else None
-
-    def key_from_sim(fn: str):
-        # 例: A_balanced_SIMSEQ_prog_triad_basic.wav -> A_balanced
-        m = re.match(r"^(.+?)_SIM", fn)
-        return m.group(1) if m else None
-
-    seq_map = {}
-    for f in seq_files:
-        k = key_from_seq(f)
-        if k:
-            seq_map[k] = f
-
-    pairs = []
-    for cond, sim_files in sim_files_by_cond.items():
-        sim_map = {}
-        for f in sim_files:
-            k = key_from_sim(f)
-            if k:
-                sim_map[k] = f
-
-        common = sorted(set(seq_map.keys()) & set(sim_map.keys()))
-        for pid in common:
-            pairs.append({
-                "pair_id": pid,
-                "condition": cond,
-                "SEQ": os.path.join(SEQ_DIR, seq_map[pid]),
-                "SIM": os.path.join(SIM_CONDS[cond], sim_map[pid]),
-                "SEQ_name": seq_map[pid],
-                "SIM_name": sim_map[pid],
-            })
-
-    return pairs
+def build_trials_for_block(block_key: str, block_dir: str, wav_files: list[str]) -> list[dict]:
+    """
+    1ブロック分の trials を作る
+    trials: [{"block":..., "item_id":..., "path":..., "filename":...}, ...]
+    """
+    items = []
+    for fn in wav_files:
+        item_id = infer_item_id(fn)
+        items.append({
+            "block": block_key,
+            "item_id": item_id,
+            "path": os.path.join(block_dir, fn),
+            "filename": fn,
+        })
+    return items
 
 # =========================
 # UI / ページ設定
 # =========================
-st.set_page_config(page_title="音律評価実験（2音）", layout="centered")
+st.set_page_config(page_title="音律評価実験（3ブロック）", layout="centered")
 
 VALENCE_LABELS = {
     5: "とてもよい",
@@ -196,8 +169,8 @@ hr {border:none; border-top:1px solid #eee; margin: 14px 0;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<div class='big-title'>音律評価実験（2音）</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub'>順番再生（SEQ）→ 同時音（SIM）を別々に評価します（SIMは2条件）。</div>", unsafe_allow_html=True)
+st.markdown("<div class='big-title'>音律評価実験（3ブロック）</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub'>ブロック順は固定：SEQ → basic → colors。各ブロック内はランダム順で評価します。</div>", unsafe_allow_html=True)
 
 # =========================
 # セッション初期化
@@ -207,30 +180,20 @@ if "participant_id" not in st.session_state:
 if "is_admin" not in st.session_state:
     st.session_state.is_admin = False
 
-if "pair_order" not in st.session_state:
-    st.session_state.pair_order = []
-if "pair_index" not in st.session_state:
-    st.session_state.pair_index = 0
-
-if "phase" not in st.session_state:
-    st.session_state.phase = "seq"
-
-if "played_seq" not in st.session_state:
-    st.session_state.played_seq = False
-if "played_sim" not in st.session_state:
-    st.session_state.played_sim = False
-
-if "play_count_seq" not in st.session_state:
-    st.session_state.play_count_seq = 0
-if "play_count_sim" not in st.session_state:
-    st.session_state.play_count_sim = 0
-
 if "profile_done" not in st.session_state:
     st.session_state.profile_done = False
 
-# seq評価をsim画面でも確実に保存できるように退避
-if "seq_saved" not in st.session_state:
-    st.session_state.seq_saved = None  # (valence, arousal, diff)
+# 3ブロック試行リスト
+if "trials" not in st.session_state:
+    st.session_state.trials = []
+if "trial_index" not in st.session_state:
+    st.session_state.trial_index = 0
+
+# 再生状態
+if "played" not in st.session_state:
+    st.session_state.played = False
+if "play_count" not in st.session_state:
+    st.session_state.play_count = 0
 
 # =========================
 # 参加者ID入力
@@ -335,233 +298,159 @@ if (not st.session_state.profile_done):
     st.stop()
 
 # =========================
-# 音源ロード
+# 音源ロード & trials 作成（初回だけ）
 # =========================
-seq_dir_full, seq_files = list_wavs(SEQ_DIR)
-if seq_dir_full is None:
-    st.error(f"音源フォルダが見つかりません: {SEQ_DIR}")
-    st.stop()
+def build_all_trials():
+    trials_all = []
 
-sim_files_by_cond = {}
-for cond, sim_dir in SIM_CONDS.items():
-    d_full, files = list_wavs(sim_dir)
-    if d_full is None:
-        st.error(f"音源フォルダが見つかりません: {sim_dir}")
-        st.stop()
-    sim_files_by_cond[cond] = files
+    for b in BLOCKS:
+        d_full, wavs = list_wavs(b["dir"])
+        if d_full is None:
+            st.error(f"音源フォルダが見つかりません: {b['dir']}")
+            st.stop()
+        if not wavs:
+            st.error(f"音源がありません: {b['dir']}")
+            st.stop()
 
-pairs = make_pairs_multi(seq_files, sim_files_by_cond)
-if not pairs:
-    st.error("ペアが作れませんでした。SEQ/SIMの命名（A_balancedなど）が揃っているか確認してください。")
-    st.stop()
+        block_trials = build_trials_for_block(b["key"], b["dir"], wavs)
 
-# ランダム順（全ペア混ぜる）
-if not st.session_state.pair_order:
-    st.session_state.pair_order = random.sample(range(len(pairs)), len(pairs))
-    st.session_state.pair_index = 0
-    st.session_state.phase = "seq"
-    st.session_state.played_seq = False
-    st.session_state.played_sim = False
-    st.session_state.play_count_seq = 0
-    st.session_state.play_count_sim = 0
+        # ブロック内ランダム（ここが重要）
+        random.shuffle(block_trials)
+
+        trials_all.extend(block_trials)
+
+    return trials_all
+
+if not st.session_state.trials:
     init_csv()
+    st.session_state.trials = build_all_trials()
+    st.session_state.trial_index = 0
+    st.session_state.played = False
+    st.session_state.play_count = 0
 
-idx = st.session_state.pair_index
-total = len(pairs)
+# =========================
+# 進捗
+# =========================
+idx = st.session_state.trial_index
+total = len(st.session_state.trials)
 
 if idx >= total:
-    st.success("🎉 全ペアの評価が完了しました！ありがとうございました！")
+    st.success("🎉 全ブロックの評価が完了しました！ありがとうございました！")
     st.stop()
 
-pair = pairs[st.session_state.pair_order[idx]]
+trial = st.session_state.trials[idx]
+
+# ブロック表示用
+block_info = next((b for b in BLOCKS if b["key"] == trial["block"]), None)
+block_label = block_info["label"] if block_info else trial["block"]
 
 st.markdown(
     f"**参加者ID:** `{participant_id}`　"
-    f"<span class='badge'>{idx+1} / {total} ペア</span>",
+    f"<span class='badge'>{idx+1} / {total} 回</span>",
     unsafe_allow_html=True
 )
 st.progress((idx + 1) / total)
 
-st.markdown(f"**条件:** `{pair['condition']}`（{COND_LABEL.get(pair['condition'], pair['condition'])}）")
+st.markdown(f"**ブロック:** `{trial['block']}`（{block_label}）")
+st.markdown(f"**項目:** `{trial['item_id']}`")
 
-phase = st.session_state.phase
+# ブロック境界の案内（最初の要素が切り替わった時にわかるように）
+if idx > 0:
+    prev_block = st.session_state.trials[idx - 1]["block"]
+    if prev_block != trial["block"]:
+        st.info(f"ブロックが切り替わりました：{prev_block} → {trial['block']}")
 
-# =========================
-# ① seq フェーズ
-# =========================
-if phase == "seq":
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("## ① 順番再生を評価（SEQ）")
-    st.markdown("<div class='small'>sequential の wav を聴いて評価します。</div>", unsafe_allow_html=True)
-    st.markdown("---")
-
-    seq_bytes = read_audio_bytes(pair["SEQ"])
-    if seq_bytes is None:
-        st.error("SEQファイルの読み込みに失敗しました。")
-        st.write("SEQ:", pair["SEQ"])
-        st.stop()
-
-    if st.button("▶ 再生を有効化（SEQ）"):
-        st.session_state.played_seq = True
-        st.session_state.play_count_seq += 1
-
-    if st.session_state.played_seq:
-        st.audio(seq_bytes, format="audio/wav")
-    else:
-        st.info("まず上のボタンで再生を有効化してください。")
-
-    st.caption(f"SEQ 再生回数：{st.session_state.play_count_seq}")
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    st.markdown("### 評価（SEQ）")
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown("**聴き心地**")
-        st.radio(
-            label="",
-            options=[5, 4, 3, 2, 1],
-            index=2,
-            key="seq_valence",
-            format_func=lambda x: VALENCE_LABELS[x],
-        )
-
-    with c2:
-        st.markdown("**緊張**")
-        st.radio(
-            label="",
-            options=[5, 4, 3, 2, 1],
-            index=2,
-            key="seq_arousal",
-            format_func=lambda x: AROUSAL_LABELS[x],
-        )
-
-    with c3:
-        st.markdown("**違和感**")
-        st.radio(
-            label="",
-            options=[5, 4, 3, 2, 1],
-            index=2,
-            key="seq_diff",
-            format_func=lambda x: DIFF_LABELS[x],
-        )
-
-    if st.button("SEQの評価を確定して、SIMへ", disabled=not st.session_state.played_seq):
-        st.session_state.seq_saved = (
-            st.session_state["seq_valence"],
-            st.session_state["seq_arousal"],
-            st.session_state["seq_diff"],
-        )
-        st.session_state.phase = "sim"
-        st.session_state.played_sim = False
-        st.session_state.play_count_sim = 0
-        st.rerun()
-
-    st.markdown("</div>", unsafe_allow_html=True)
+# キャッシュクリアボタン
+if st.button("🔄 再生状態をリセット（この1試行だけ）"):
+    st.session_state.played = False
+    st.session_state.play_count = 0
+    st.rerun()
 
 # =========================
-# ② sim フェーズ
+# 試行UI
 # =========================
+st.markdown("<div class='card'>", unsafe_allow_html=True)
+st.markdown("## 音源を聴いて評価")
+st.markdown("<div class='small'>ボタンで再生を有効化してから音を聴き、評価してください。</div>", unsafe_allow_html=True)
+st.markdown("---")
+
+audio_bytes = read_audio_bytes(trial["path"])
+if audio_bytes is None:
+    st.error("音源の読み込みに失敗しました。パスを確認してください。")
+    st.write("PATH:", trial["path"])
+    st.stop()
+
+if st.button("▶ 再生を有効化"):
+    st.session_state.played = True
+    st.session_state.play_count += 1
+
+if st.session_state.played:
+    st.audio(audio_bytes, format="audio/wav")
 else:
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("## ② 同時音を評価（SIM）")
-    st.markdown("<div class='small'>条件フォルダ（basic/colors）の wav を聴いて評価します。</div>", unsafe_allow_html=True)
-    st.markdown("---")
+    st.info("まず上のボタンで再生を有効化してください。")
 
-    sim_bytes = read_audio_bytes(pair["SIM"])
-    if sim_bytes is None:
-        st.error("SIMファイルの読み込みに失敗しました。")
-        st.write("SIM:", pair["SIM"])
-        st.stop()
+st.caption(f"再生回数：{st.session_state.play_count}")
+st.markdown("<hr>", unsafe_allow_html=True)
 
-    if st.button("▶ 再生を有効化（SIM）"):
-        st.session_state.played_sim = True
-        st.session_state.play_count_sim += 1
+st.markdown("### 評価")
+c1, c2, c3 = st.columns(3)
 
-    if st.session_state.played_sim:
-        st.audio(sim_bytes, format="audio/wav")
-    else:
-        st.info("まず上のボタンで再生を有効化してください。")
+with c1:
+    st.markdown("**聴き心地**")
+    st.radio(
+        label="",
+        options=[5, 4, 3, 2, 1],
+        index=2,
+        key="valence",
+        format_func=lambda x: VALENCE_LABELS[x],
+    )
 
-    st.caption(f"SIM 再生回数：{st.session_state.play_count_sim}")
-    st.markdown("<hr>", unsafe_allow_html=True)
+with c2:
+    st.markdown("**緊張**")
+    st.radio(
+        label="",
+        options=[5, 4, 3, 2, 1],
+        index=2,
+        key="arousal",
+        format_func=lambda x: AROUSAL_LABELS[x],
+    )
 
-    st.markdown("### 評価（SIM）")
-    c1, c2, c3 = st.columns(3)
+with c3:
+    st.markdown("**違和感**")
+    st.radio(
+        label="",
+        options=[5, 4, 3, 2, 1],
+        index=2,
+        key="diff",
+        format_func=lambda x: DIFF_LABELS[x],
+    )
 
-    with c1:
-        st.markdown("**聴き心地**")
-        sim_valence = st.radio(
-            label="",
-            options=[5, 4, 3, 2, 1],
-            index=2,
-            key="sim_valence",
-            format_func=lambda x: VALENCE_LABELS[x],
-        )
+if st.button("評価を記録して次へ", disabled=not st.session_state.played):
+    timestamp = datetime.datetime.utcnow().isoformat()
 
-    with c2:
-        st.markdown("**緊張**")
-        sim_arousal = st.radio(
-            label="",
-            options=[5, 4, 3, 2, 1],
-            index=2,
-            key="sim_arousal",
-            format_func=lambda x: AROUSAL_LABELS[x],
-        )
+    row = [
+        participant_id,
+        timestamp,
+        trial["block"],
+        trial["item_id"],
+        trial["filename"],
+        st.session_state["valence"],
+        st.session_state["arousal"],
+        st.session_state["diff"],
+        st.session_state.play_count,
+    ]
+    append_row(row)
 
-    with c3:
-        st.markdown("**違和感**")
-        sim_diff = st.radio(
-            label="",
-            options=[5, 4, 3, 2, 1],
-            index=2,
-            key="sim_diff",
-            format_func=lambda x: DIFF_LABELS[x],
-        )
+    # 次へ
+    st.session_state.trial_index += 1
+    st.session_state.played = False
+    st.session_state.play_count = 0
 
-    if st.button("評価を記録して次のペアへ", disabled=not st.session_state.played_sim):
-        timestamp = datetime.datetime.utcnow().isoformat()
+    # 前回値残り対策
+    for k in ["valence", "arousal", "diff"]:
+        if k in st.session_state:
+            del st.session_state[k]
 
-        if st.session_state.seq_saved is None:
-            st.error("SEQの評価が見つかりません。SEQ画面に戻ってやり直してください。")
-            st.stop()
+    st.rerun()
 
-        seq_valence, seq_arousal, seq_diff = st.session_state.seq_saved
-
-        row = [
-            participant_id,
-            timestamp,
-            pair["pair_id"],
-            pair["condition"],     # ★追加
-            pair["SEQ_name"],
-            pair["SIM_name"],
-            seq_valence,
-            seq_arousal,
-            seq_diff,
-            st.session_state.play_count_seq,
-            sim_valence,
-            sim_arousal,
-            sim_diff,
-            st.session_state.play_count_sim,
-        ]
-        append_row(row)
-
-        # 次ペアへ：状態リセット
-        st.session_state.pair_index += 1
-        st.session_state.phase = "seq"
-        st.session_state.played_seq = False
-        st.session_state.played_sim = False
-        st.session_state.play_count_seq = 0
-        st.session_state.play_count_sim = 0
-
-        # 評価値も消す（前回値残り対策）
-        for k in ["seq_valence", "seq_arousal", "seq_diff", "sim_valence", "sim_arousal", "sim_diff"]:
-            if k in st.session_state:
-                del st.session_state[k]
-
-        # 退避データもリセット
-        st.session_state.seq_saved = None
-
-        st.rerun()
-
-    st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
